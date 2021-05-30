@@ -42,13 +42,15 @@ module i_RISCV(clk,
     reg [31:0] PC_next;
 
     //----------pipeline registers-------
-    reg [63:0] IF_ID, IF_ID_next; 
+    reg [64:0] IF_ID, IF_ID_next; 
     reg [118:0] ID_EX, ID_EX_next; 
     reg [73:0] EX_MEM, EX_MEM_next; 
     reg [70:0] MEM_WB, MEM_WB_next; 
 
     //----------pipeline wires-------
     wire [31:0] IF_ID_PC, IF_ID_ICACHE_rdata;
+    wire IF_ID_ICACHE_stall;
+    assign IF_ID_ICACHE_stall = IF_ID[64];
     assign IF_ID_PC = IF_ID[63:32];
     assign IF_ID_ICACHE_rdata = IF_ID[31:0];
 
@@ -89,23 +91,27 @@ module i_RISCV(clk,
     wire [1:0] forward_ctrl_1, forward_ctrl_2;
 
     //----------hazard wires-------
-    wire stall_ctrl, PCWrite, IF_IDWrite;
-    wire [7:0] ctrl_or_flush;
-
-    assign ctrl_or_flush =  (stall_ctrl)?   8'b0:
-                                            {{ctrlSignal[7:2]}, {ALUOp}};
+    wire data_haz;
+    wire [7:0] ID_EX_ctrl_next;
+    wire [1:0] MEM_WB_ctrl_next;
+    
+    assign data_haz = (ID_EX_ctrl_M[1] && ((ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) || (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})));
+    assign ID_EX_ctrl_next =  (data_haz && IF_ID_ICACHE_stall)? 8'b0:
+                                                                {{ctrlSignal[7:2]}, {ALUOp}};
+    assign MEM_WB_ctrl_next = (DCACHE_stall)?    2'b0:
+                                                EX_MEM_ctrl_WB;
 
     // assign
     assign ALUData1 =   (forward_ctrl_1 == 2'b00)?  ID_EX_rData1:
                         (forward_ctrl_1 == 2'b01)?  wDataFin:
-                        (forward_ctrl_1 == 2'b10)?  MEM_WB_ALUout:
+                        (forward_ctrl_1 == 2'b10)?  EX_MEM_ALUout:
                                                     32'b0;
     assign ALUData2_preimm =    (forward_ctrl_2 == 2'b00)?  ID_EX_rData2:
                                 (forward_ctrl_2 == 2'b01)?  wDataFin:
-                                (forward_ctrl_2 == 2'b10)?  MEM_WB_ALUout:
+                                (forward_ctrl_2 == 2'b10)?  EX_MEM_ALUout:
                                                             32'b0;
     assign ALUData2 = (ID_EX_ctrl_EX[0])? Imm : ALUData2_preimm;
-    assign wData = (ctrlSignal[8])? {AddrNext} : wDataFin; // TODO (AddrNext)
+    assign wData = (ctrlSignal[8])? {AddrNext} : wDataFin;
     assign DCACHE_wen = EX_MEM_ctrl_M[0];
     assign DCACHE_ren = EX_MEM_ctrl_M[1];
     assign DCACHE_addr = EX_MEM_ALUout;
@@ -113,40 +119,59 @@ module i_RISCV(clk,
     assign wDataFin = (MEM_WB_ctrl_WB[0])? {MEM_WB_DCACHE_rdata[7:0], MEM_WB_DCACHE_rdata[15:8], MEM_WB_DCACHE_rdata[23:16], MEM_WB_DCACHE_rdata[31:24]} : MEM_WB_ALUout;
     assign ICACHE_addr = PC;
 
-    // PC related // TODO!!!!
-    assign equal = (rData1 == rData2);
-    assign bne = mem_rdata_I[20] & ~equal & ctrlSignal[2];
+    // PC related
+    assign equal = (rData1 == rData2); // TODO: forwarding rData1,2
+    assign bne = (IF_ID_ICACHE_rdata[20] && (~equal) && ctrlSignal[2]);
+    assign beq = ((~IF_ID_ICACHE_rdata[20]) && equal && ctrlSignal[2])
     assign AddrNext = PC[31:0] + 32'd4;       // can modify to 30 bits if necessary
     assign AddrJalPre = IF_ID_PC + Imm;
-    assign AddrJalrPre = ALUout;
-    assign AddrFin =    (ctrlSignal[0])?                            AddrJalrPre: 
-                        ((equal&ctrlSignal[2])|ctrlSignal[1]|bne)?   AddrJalPre:
-                                                                    AddrNext;
+    // assign AddrJalrPre = ALUout;
+    assign AddrFin =    (ctrlSignal[0])?                AddrJalrPre: 
+                        (beq || ctrlSignal[1] || bne)?  AddrJalPre:
+                                                        AddrNext;
 
     // combinatial
     always @(*) begin
-        PC_next = AddrFin;
+        if ((~data_haz) && (~DCACHE_stall) && (~ICACHE_stall)) begin
+            PC_next = AddrFin;
+        end
+        else begin
+            PC_next = PC;
+        end
 
-        IF_ID_next[63:32] = PC;
-        IF_ID_next[31:0] = ICACHE_rdata;
+        if ((~data_haz) && (~DCACHE_stall)) begin
+            IF_ID_next[64] = ICACHE_stall
+            IF_ID_next[63:32] = PC;
+            IF_ID_next[31:0] = ICACHE_rdata;
+        end
+        else begin
+            IF_ID_next = IF_ID;
+        end
 
-        ID_EX_next[118:116] = {{ctrl_or_flush[1:0]}, {ctrl_or_flush[6]}};
-        ID_EX_next[115:114] = {{ctrl_or_flush[7]}, {ctrl_or_flush[4]}};
-        ID_EX_next[113:111] = {{ctrl_or_flush[2]}, {ctrl_or_flush[3]}, {ctrl_or_flush[5]}};
-        ID_EX_next[110:79] = rData1;
-        ID_EX_next[78:47] = rData2;
-        ID_EX_next[46:15] = Imm;
-        ID_EX_next[14:10] = {{IF_ID_ICACHE_rdata[11:8]}, IF_ID_ICACHE_rdata[23]};
-        ID_EX_next[9:5] = {IF_ID_ICACHE_rdata[0], {IF_ID_ICACHE_rdata[15:12]}};
-        ID_EX_next[4:0] = {{IF_ID_ICACHE_rdata[19:16]}, IF_ID_ICACHE_rdata[31]};
+        if (~DCACHE_stall) begin
+            ID_EX_next[118:116] = {{ID_EX_ctrl_next[1:0]}, {ID_EX_ctrl_next[6]}};
+            ID_EX_next[115:114] = {{ID_EX_ctrl_next[7]}, {ID_EX_ctrl_next[4]}};
+            ID_EX_next[113:111] = {{ID_EX_ctrl_next[2]}, {ID_EX_ctrl_next[3]}, {ID_EX_ctrl_next[5]}};
+            ID_EX_next[110:79] = rData1;
+            ID_EX_next[78:47] = rData2;
+            ID_EX_next[46:15] = Imm;
+            ID_EX_next[14:10] = {{IF_ID_ICACHE_rdata[11:8]}, IF_ID_ICACHE_rdata[23]};
+            ID_EX_next[9:5] = {IF_ID_ICACHE_rdata[0], {IF_ID_ICACHE_rdata[15:12]}};
+            ID_EX_next[4:0] = {{IF_ID_ICACHE_rdata[19:16]}, IF_ID_ICACHE_rdata[31]};
 
-        EX_MEM_next[73:72] = ID_EX_ctrl_WB;
-        EX_MEM_next[71:69] = ID_EX_ctrl_M;
-        EX_MEM_next[68:37] = ALUout;
-        EX_MEM_next[36:5] = ALUData2_preimm;
-        EX_MEM_next[4:0] = ID_EX_rd;
+            EX_MEM_next[73:72] = ID_EX_ctrl_WB;
+            EX_MEM_next[71:69] = ID_EX_ctrl_M;
+            EX_MEM_next[68:37] = ALUout;
+            EX_MEM_next[36:5] = ALUData2_preimm;
+            EX_MEM_next[4:0] = ID_EX_rd;
+        end
+        else begin
+            ID_EX_next = ID_EX;
 
-        MEM_WB_next[70:69] = EX_MEM_ctrl_WB;
+            EX_MEM_next = EX_MEM;
+        end
+
+        MEM_WB_next[70:69] = MEM_WB_ctrl_next;
         MEM_WB_next[68:37] = DCACHE_rdata;
         MEM_WB_next[36:5] = EX_MEM_ALUout;
         MEM_WB_next[4:0] = EX_MEM_rd;
@@ -219,17 +244,6 @@ module i_RISCV(clk,
                     .forward_ctrl_1(forward_ctrl_1), 
                     .forward_ctrl_2(forward_ctrl_2)
                     );
-
-    Hazard hazard(  .IF_ID_rs1({{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}), 
-                    .IF_ID_rs2({{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}}),
-                    .ID_EX_MemRead(ID_EX_ctrl_M[1]),
-                    .stall_from_D(DCACHE_stall),
-                    .stall_from_I(ICACHE_stall),
-                    .ID_EX_rd(ID_EX_rd),
-                    .stall_ctrl(stall_ctrl), 
-                    .PCWrite(PCWrite), 
-                    .IF_IDWrite(IF_IDWrite)
-    );
 
 endmodule
 
@@ -477,33 +491,13 @@ module Forward( ID_EX_rs1,
     output [1:0] forward_ctrl_1; 
     output [1:0] forward_ctrl_2;
 
+    // 00: normal, 01: WB, 10: MEM
     assign forward_ctrl_1 = (EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs1))? 2'b10:
-                            (MEM_WB_RegWrite and ~(MEM_WB_rd == 5'b0) and ~(EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs1)) and (MEM_WB_rd == ID_EX_rs1))? 2'b01:
+                            (MEM_WB_RegWrite and ~(MEM_WB_rd == 5'b0) and (MEM_WB_rd == ID_EX_rs1) and ~(EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs1)))? 2'b01:
                             2'b00;
     
     assign forward_ctrl_2 = (EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs2))? 2'b10:
-                            (MEM_WB_RegWrite and ~(MEM_WB_rd == 5'b0) and ~(EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs2)) and (MEM_WB_rd == ID_EX_rs2))? 2'b01:
+                            (MEM_WB_RegWrite and ~(MEM_WB_rd == 5'b0) and (MEM_WB_rd == ID_EX_rs2) and ~(EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs2)))? 2'b01:
                             2'b00;
 
-endmodule
-
-// handle stalls
-module Hazard ( IF_ID_rs1, 
-                IF_ID_rs2,
-                ID_EX_MemRead,
-                stall_from_D,
-                stall_from_I,
-                ID_EX_rd,
-                stall_ctrl, 
-                PCWrite, 
-                IF_IDWrite
-    );
-
-    input [4:0] IF_ID_rs1;
-    input [4:0] IF_ID_rs2;
-    input [4:0] ID_EX_rd;
-    input ID_EX_MemRead, stall_from_D, stall_from_I;
-    output stall_ctrl, PCWrite, IF_IDWrite;
-
-    
 endmodule
