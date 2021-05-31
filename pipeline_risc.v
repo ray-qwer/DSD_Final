@@ -37,19 +37,19 @@ module i_RISCV(clk,
     wire [31:0] rData1, rData2, Imm, ALUData1, ALUData2, ALUData2_preimm, ALUout, MemAddr, wData, wDataFin;
     wire [31:0] AddrNext, AddrJalPre, AddrJalrPre, AddrFin;
     wire [3:0] alu_ctrl;
-    wire equal, BandZ, BandZorJ, bne;
     reg [31:0] PC;
     reg [31:0] PC_next;
 
     //----------pipeline registers-------
-    reg [64:0] IF_ID, IF_ID_next; 
+    reg [96:0] IF_ID, IF_ID_next; 
     reg [118:0] ID_EX, ID_EX_next; 
     reg [73:0] EX_MEM, EX_MEM_next; 
     reg [70:0] MEM_WB, MEM_WB_next; 
 
     //----------pipeline wires-------
-    wire [31:0] IF_ID_PC, IF_ID_ICACHE_rdata;
+    wire [31:0] IF_ID_PC_4, IF_ID_PC, IF_ID_ICACHE_rdata;
     wire IF_ID_ICACHE_stall;
+    assign IF_ID_PC_4 = IF_ID[96:65];
     assign IF_ID_ICACHE_stall = IF_ID[64];
     assign IF_ID_PC = IF_ID[63:32];
     assign IF_ID_ICACHE_rdata = IF_ID[31:0];
@@ -88,30 +88,76 @@ module i_RISCV(clk,
     assign MEM_WB_rd = MEM_WB[4:0];
 
     //----------forward wires-------
-    wire [1:0] forward_ctrl_1, forward_ctrl_2;
+    wire [1:0] forward_ctrl_EX_1, forward_ctrl_EX_2;
+    wire [1:0] forward_ctrl_ID_1, forward_ctrl_ID_2;
 
     //----------hazard wires-------
-    wire data_haz;
+    wire load_EXuse_haz, load_IDuse_haz, ALU_IDuse_haz;
     wire [7:0] ID_EX_ctrl_next;
     wire [1:0] MEM_WB_ctrl_next;
     
-    assign data_haz = (ID_EX_ctrl_M[1] && ((ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) || (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})));
-    assign ID_EX_ctrl_next =  (data_haz && IF_ID_ICACHE_stall)? 8'b0:
-                                                                {{ctrlSignal[7:2]}, {ALUOp}};
+    assign load_EXuse_haz = (
+                            (ID_EX_ctrl_M[1]) && // previous inst.(load) has MemRead 
+                            ~(ID_EX_rd == 5'b0) && 
+                            (   
+                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
+                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                            )
+                            );
+    assign ID_EX_ctrl_next =    (
+                                load_EXuse_haz || 
+                                IF_ID_ICACHE_stall ||
+                                load_IDuse_haz ||
+                                ALU_IDuse_haz
+                                )?                      8'b0:
+                                                        {{ctrlSignal[7:2]}, {ALUOp}};
     assign MEM_WB_ctrl_next = (DCACHE_stall)?    2'b0:
                                                 EX_MEM_ctrl_WB;
 
+    assign load_IDuse_haz = (
+                            (
+                                (
+                                    (ID_EX_ctrl_M[1]) &&
+                                    ~(ID_EX_rd == 5'b0) && 
+                                    (   
+                                        (ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
+                                        (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                                    )
+                                ) || // previous is a load
+                                (
+                                    (EX_MEM_ctrl_M[1]) &&
+                                    ~(EX_MEM_rd == 5'b0) && 
+                                    (   
+                                        (EX_MEM_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
+                                        (EX_MEM_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                                    )
+                                ) // second previous is a load
+                            ) &&
+                            (ctrlSignal[2]) // now branch
+                            );
+
+    assign ALU_IDuse_haz =  (
+                            (ID_EX_ctrl_WB[1]) && // previous inst. has RegWrite
+                            ~(ID_EX_rd == 5'b0) && 
+                            (
+                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
+                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                            ) &&
+                            (ctrlSignal[2]) // now branch
+                            );
+
     // assign
-    assign ALUData1 =   (forward_ctrl_1 == 2'b00)?  ID_EX_rData1:
-                        (forward_ctrl_1 == 2'b01)?  wDataFin:
-                        (forward_ctrl_1 == 2'b10)?  EX_MEM_ALUout:
-                                                    32'b0;
-    assign ALUData2_preimm =    (forward_ctrl_2 == 2'b00)?  ID_EX_rData2:
-                                (forward_ctrl_2 == 2'b01)?  wDataFin:
-                                (forward_ctrl_2 == 2'b10)?  EX_MEM_ALUout:
-                                                            32'b0;
+    assign ALUData1 =   (forward_ctrl_EX_1 == 2'b00)?   ID_EX_rData1:
+                        (forward_ctrl_EX_1 == 2'b01)?   wDataFin:
+                        (forward_ctrl_EX_1 == 2'b10)?   EX_MEM_ALUout:
+                                                        32'b0;
+    assign ALUData2_preimm =    (forward_ctrl_EX_2 == 2'b00)?   ID_EX_rData2:
+                                (forward_ctrl_EX_2 == 2'b01)?   wDataFin:
+                                (forward_ctrl_EX_2 == 2'b10)?   EX_MEM_ALUout:
+                                                                32'b0;
     assign ALUData2 = (ID_EX_ctrl_EX[0])? Imm : ALUData2_preimm;
-    assign wData = (ctrlSignal[8])? {AddrNext} : wDataFin;
+
+    assign wData = (ctrlSignal[8])? {IF_ID_PC_4} : wDataFin;
     assign DCACHE_wen = EX_MEM_ctrl_M[0];
     assign DCACHE_ren = EX_MEM_ctrl_M[1];
     assign DCACHE_addr = EX_MEM_ALUout;
@@ -119,30 +165,49 @@ module i_RISCV(clk,
     assign wDataFin = (MEM_WB_ctrl_WB[0])? {MEM_WB_DCACHE_rdata[7:0], MEM_WB_DCACHE_rdata[15:8], MEM_WB_DCACHE_rdata[23:16], MEM_WB_DCACHE_rdata[31:24]} : MEM_WB_ALUout;
     assign ICACHE_addr = PC;
 
-    // PC related
-    assign equal = (rData1 == rData2); // TODO: forwarding rData1,2
+    // PC logic
+    wire forwarded_rdata1, forwarded_rdata2, equal, beq, bne;
+    wire [31:0] Jal_or_Jalr_data, Addr_jump;
+    assign forwarded_rdata1 =   (forward_ctrl_ID_1 == 2'b00)?   rData1:
+                            (forward_ctrl_ID_1 == 2'b01)?   wDataFin:
+                            (forward_ctrl_ID_1 == 2'b10)?   EX_MEM_ALUout:
+                                                            32'b0;
+    assign forwarded_rdata2 =   (forward_ctrl_ID_2 == 2'b00)?   rData2:
+                            (forward_ctrl_ID_2 == 2'b01)?   wDataFin:
+                            (forward_ctrl_ID_2 == 2'b10)?   EX_MEM_ALUout:
+                                                            32'b0;
+    assign equal = (forwarded_rdata1 == forwarded_rdata2);
     assign bne = (IF_ID_ICACHE_rdata[20] && (~equal) && ctrlSignal[2]);
     assign beq = ((~IF_ID_ICACHE_rdata[20]) && equal && ctrlSignal[2])
-    assign AddrNext = PC[31:0] + 32'd4;       // can modify to 30 bits if necessary
-    assign AddrJalPre = IF_ID_PC + Imm;
-    // assign AddrJalrPre = ALUout;
-    assign AddrFin =    (ctrlSignal[0])?                AddrJalrPre: 
-                        (beq || ctrlSignal[1] || bne)?  AddrJalPre:
-                                                        AddrNext;
+    assign AddrNext = PC[31:0] + 32'd4;
+    // assign AddrJalPre = IF_ID_PC + Imm;
+    // assign AddrJalrPre = forwarded_rdata1 + Imm;
+    assign Jal_or_Jalr_data =   (ctrlSignal[0])?                forwarded_rdata1:
+                                (beq || ctrlSignal[1] || bne)?  IF_ID_PC;
+    assign Addr_jump = Imm + Jal_or_Jalr_data;
+    // assign AddrFin =    (ctrlSignal[0])?                AddrJalrPre:
+    //                     (beq || ctrlSignal[1] || bne)?  AddrJalPre:
+    //                                                     AddrNext;
+    assign AddrFin = (ctrlSignal[0] || beq || ctrlSignal[1] || bne)?    Addr_jump:
+                                                                            AddrNext;
 
     // combinatial
     always @(*) begin
-        if ((~data_haz) && (~DCACHE_stall) && (~ICACHE_stall)) begin
+        if ((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz)) begin
             PC_next = AddrFin;
         end
         else begin
             PC_next = PC;
         end
 
-        if ((~data_haz) && (~DCACHE_stall)) begin
-            IF_ID_next[64] = ICACHE_stall
+        if ((~load_EXuse_haz) && (~DCACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz)) begin
+            IF_ID_next[96:65] = AddrNext;
+            IF_ID_next[64] = ICACHE_stall;
             IF_ID_next[63:32] = PC;
             IF_ID_next[31:0] = ICACHE_rdata;
+        end
+        else if (ctrlSignal[0] || beq || ctrlSignal[1] || bne) begin // branch taken / Jar / Jarl flush
+            IF_ID_next = 97'b0;
         end
         else begin
             IF_ID_next = IF_ID;
@@ -202,7 +267,7 @@ module i_RISCV(clk,
                 .rd(MEM_WB_rd),
                 .rData1(rData1),
                 .rData2(rData2),
-                .Reg_write(MEM_WB_ctrl_WB[1]),
+                .Reg_write((MEM_WB_ctrl_WB[1] || ctrlSignal[8])),
                 .clk(clk),
                 .rst_n(rst_n)
                 );
@@ -237,12 +302,16 @@ module i_RISCV(clk,
     
     Forward forward(.ID_EX_rs1(ID_EX_rs1),
                     .ID_EX_rs2(ID_EX_rs2),
+                    .IF_ID_rs1({{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}),
+                    .IF_ID_rs2({{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}}),
                     .EX_MEM_rd(EX_MEM_rd),
                     .MEM_WB_rd(MEM_WB_rd),
                     .MEM_WB_RegWrite(MEM_WB_ctrl_WB[1]),
                     .EX_MEM_RegWrite(EX_MEM_ctrl_WB[1]),
-                    .forward_ctrl_1(forward_ctrl_1), 
-                    .forward_ctrl_2(forward_ctrl_2)
+                    .forward_ctrl_EX_1(forward_ctrl_EX_1), 
+                    .forward_ctrl_EX_2(forward_ctrl_EX_2),
+                    .forward_ctrl_ID_1(forward_ctrl_ID_1),
+                    .forward_ctrl_ID_2(forward_ctrl_ID_2)
                     );
 
 endmodule
@@ -475,12 +544,16 @@ endmodule
 
 module Forward( ID_EX_rs1,
                 ID_EX_rs2,
+                IF_ID_rs1,
+                IF_ID_rs2,
                 EX_MEM_rd,
                 MEM_WB_rd,
                 MEM_WB_RegWrite,
                 EX_MEM_RegWrite,
-                forward_ctrl_1, 
-                forward_ctrl_2
+                forward_ctrl_EX_1, 
+                forward_ctrl_EX_2,
+                forward_ctrl_ID_1, 
+                forward_ctrl_ID_2
     );
 
     input [4:0] ID_EX_rs1;
@@ -488,16 +561,26 @@ module Forward( ID_EX_rs1,
     input [4:0] EX_MEM_rd;
     input [4:0] MEM_WB_rd;
     input MEM_WB_RegWrite, EX_MEM_RegWrite;
-    output [1:0] forward_ctrl_1; 
-    output [1:0] forward_ctrl_2;
+    output [1:0] forward_ctrl_EX_1; 
+    output [1:0] forward_ctrl_EX_2;
+    output [1:0] forward_ctrl_ID_1; 
+    output [1:0] forward_ctrl_ID_2;
 
     // 00: normal, 01: WB, 10: MEM
-    assign forward_ctrl_1 = (EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs1))? 2'b10:
-                            (MEM_WB_RegWrite and ~(MEM_WB_rd == 5'b0) and (MEM_WB_rd == ID_EX_rs1) and ~(EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs1)))? 2'b01:
-                            2'b00;
+    assign forward_ctrl_EX_1 =  (EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == ID_EX_rs1))? 2'b10:
+                                (MEM_WB_RegWrite && ~(MEM_WB_rd == 5'b0) && (MEM_WB_rd == ID_EX_rs1) && ~(EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == ID_EX_rs1)))? 2'b01:
+                                2'b00;
     
-    assign forward_ctrl_2 = (EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs2))? 2'b10:
-                            (MEM_WB_RegWrite and ~(MEM_WB_rd == 5'b0) and (MEM_WB_rd == ID_EX_rs2) and ~(EX_MEM_RegWrite and ~(EX_MEM_rd == 5'b0) and (EX_MEM_rd == ID_EX_rs2)))? 2'b01:
-                            2'b00;
+    assign forward_ctrl_EX_2 =  (EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == ID_EX_rs2))? 2'b10:
+                                (MEM_WB_RegWrite && ~(MEM_WB_rd == 5'b0) && (MEM_WB_rd == ID_EX_rs2) && ~(EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == ID_EX_rs2)))? 2'b01:
+                                2'b00;
+
+    assign forward_ctrl_ID_1 =  (EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == IF_ID_rs1))? 2'b10:
+                                (MEM_WB_RegWrite && ~(MEM_WB_rd == 5'b0) && (MEM_WB_rd == ID_EX_rs1) && ~(EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == ID_EX_rs1)))? 2'b01:
+                                2'b00;
+
+    assign forward_ctrl_ID_2 =  (EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == IF_ID_rs2))? 2'b10:
+                                (MEM_WB_RegWrite && ~(MEM_WB_rd == 5'b0) && (MEM_WB_rd == ID_EX_rs2) && ~(EX_MEM_RegWrite && ~(EX_MEM_rd == 5'b0) && (EX_MEM_rd == ID_EX_rs2)))? 2'b01:
+                                2'b00;
 
 endmodule
