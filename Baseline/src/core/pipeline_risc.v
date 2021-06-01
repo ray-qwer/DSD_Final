@@ -1,4 +1,4 @@
-module i_RISCV(clk,
+module RISCV_Pipeline(clk,
             rst_n,
             //----------I cache interface-------
             ICACHE_ren,
