@@ -178,7 +178,7 @@ module RISCV_Pipeline(clk,
                                                             32'b0;
     assign equal = (forwarded_rdata1 == forwarded_rdata2);
     assign bne = (IF_ID_ICACHE_rdata[20] && (~equal) && ctrlSignal[2]);
-    assign beq = ((~IF_ID_ICACHE_rdata[20]) && equal && ctrlSignal[2])
+    assign beq = ((~IF_ID_ICACHE_rdata[20]) && equal && ctrlSignal[2]);
     assign AddrNext = PC[31:0] + 32'd4;
     // assign AddrJalPre = IF_ID_PC + Imm;
     // assign AddrJalrPre = forwarded_rdata1 + Imm;

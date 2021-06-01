@@ -1,5 +1,5 @@
 // Top module of your design, you cannot modify this module!!
-`include "./core/RISCV_Pipeline.v"
+`include "./core/pipeline_risc.v"
 `include "./core/cache_2way.v"
 
 module CHIP (	clk,
