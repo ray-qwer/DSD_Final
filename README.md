@@ -6,5 +6,7 @@
 
 ## Usage
 ### RTL  
+    ncverilog Final_tb.v CHIP.v slow_memory.v +define+noHazard +access+r
+## Note
+當出現stall的時候，control path可以不用flush  
 
-    ncverilog Final_tb.v CHIP.v slow_memory.v +define+noHazard+access+r
