@@ -1,4 +1,4 @@
-module cache(
+module i_cache(
     clk,
     proc_reset,
     proc_read,
@@ -57,27 +57,6 @@ module cache(
 
     integer i;
 
-//==== Write Buffer        ================================
-    reg [31:0] proc_wdata_DWB;
-    reg [2:0] idx_DWB;
-    reg [1:0] sel_DWB;
-    reg [2:0] state_DWB;
-    reg proc_write_DWB, hit_DWB;
-    reg [1:0] sel_asso_DWB;
-    wire [127:0] a;
-    wire b;
-    assign a = cache_nxt[0][127:0];
-    assign b = (state_DWB == IDLE) && proc_write_DWB && hit_DWB; 
-    
-always@(posedge clk) begin
-    proc_write_DWB <= proc_write;
-    hit_DWB <= hit;
-    idx_DWB <= idx;
-    sel_DWB <= sel;
-    proc_wdata_DWB <= proc_wdata;
-    state_DWB <= state;
-    sel_asso_DWB <= sel_asso;
-end
 
 //==== FSM                 ================================
 always@(*) begin
@@ -101,24 +80,12 @@ always@(*) begin
     case(state)
         IDLE:
             begin
-                if (proc_read || proc_write) begin
+                if (proc_read) begin
                     if (hit) begin
                         state_nxt = IDLE;
-                    end else if (!hit && !dirty) begin
+                    end else if (!hit) begin
                         state_nxt = ALLOCATE;
-                    end else if (!hit && dirty) begin
-                        state_nxt = WRITE_BACK;
                     end
-                end
-            end
-        WRITE_BACK:
-            begin
-                // write cache block to memory
-                // cache address = {cache[idx][152:128], idx} (25 + 3 = 28)
-                if (mem_ready) begin
-                    state_nxt = ALLOCATE;
-                end else begin
-                    state_nxt = WRITE_BACK;
                 end
             end
         ALLOCATE:
@@ -150,30 +117,17 @@ always@(*) begin
     proc_rdata = 0;
     for(i=0; i<8; i=i+1)
         cache_nxt[i] = cache[i];
-    if ((state_DWB == IDLE) && proc_write_DWB) begin
-        if (sel_asso_DWB == 2'b10) begin
-            cache_nxt[idx_DWB][311] = 1'b1;
-            cache_nxt[idx_DWB][(sel_DWB+1)*32-1 + 157 -: 32] = proc_wdata_DWB;
-        end
-        else if (sel_asso_DWB == 2'b01) begin
-            cache_nxt[idx_DWB][154] = 1'b1;
-            cache_nxt[idx_DWB][(sel_DWB+1)*32-1 -: 32] = proc_wdata_DWB;
-        end
-    end
 
     // case
     case(state)
         IDLE:
             begin
-                if (proc_read || proc_write) begin
+                if (proc_read) begin
                     case(sel_asso)
                         2'b10:
                         begin
                             if (proc_read) begin
-                                if ((proc_write_DWB && hit_DWB) && (idx_DWB == idx) && (sel_DWB == sel) && (sel_asso_DWB == sel_asso))
-                                    proc_rdata = proc_wdata_DWB;
-                                else
-                                    proc_rdata = cache[idx][(sel+1)*32-1 + 157 -: 32];
+                                proc_rdata = cache[idx][(sel+1)*32-1 + 157 -: 32];
                             end
                             cache_nxt[idx][313] = 0;
                             cache_nxt[idx][156] = 1;
@@ -181,10 +135,7 @@ always@(*) begin
                         2'b01:
                         begin
                             if (proc_read) begin
-                                if ((proc_write_DWB && hit_DWB) && (idx_DWB == idx) && (sel_DWB == sel) && (sel_asso_DWB == sel_asso))
-                                    proc_rdata = proc_wdata_DWB;
-                                else
-                                    proc_rdata = cache[idx][(sel+1)*32-1 -: 32];
+                                proc_rdata = cache[idx][(sel+1)*32-1 -: 32];
                             end
                             cache_nxt[idx][313] = 1;
                             cache_nxt[idx][156] = 0;
@@ -192,37 +143,9 @@ always@(*) begin
                         2'b00:
                         begin
                             proc_stall = 1;
-                            if (dirty)
-                                mem_write = 1;
-                            else
-                                mem_read = 1;
+                            mem_read = 1;
                         end
                     endcase
-                end
-            end
-        WRITE_BACK:
-            // write cache block to memory
-            // cache address = {cache[idx][152:128], idx} (25 + 3 = 28)
-            begin
-                mem_write = 1;
-                proc_stall = 1;
-                case(replace)
-                    2'b10: begin
-                        mem_addr = {cache[idx][310:285], idx};
-                        mem_wdata = cache[idx][284:157];
-                    end
-                    2'b01: begin
-                        mem_addr = {cache[idx][153:128], idx};
-                        mem_wdata = cache[idx][127:0];
-                    end
-                    default: begin
-                        mem_addr = 0;
-                        mem_wdata = 0;
-                    end
-                endcase
-
-                if (mem_ready) begin
-                    mem_write = 0;
                 end
             end
         ALLOCATE:
@@ -239,11 +162,9 @@ always@(*) begin
                 case(replace)
                     2'b10: begin
                         cache_nxt[idx][313:157] = {3'b010, tag, mem_rdata};
-                        cache_nxt[idx][156] = 1'b1;
                     end
                     2'b01: begin
                         cache_nxt[idx][156:0] = {3'b010, tag, mem_rdata};
-                        cache_nxt[idx][313] = 1'b1;
                     end
                     default:
                         cache_nxt[idx] = cache[idx];

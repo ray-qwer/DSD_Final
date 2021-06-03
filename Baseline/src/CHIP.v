@@ -1,6 +1,7 @@
 // Top module of your design, you cannot modify this module!!
 `include "./core/pipeline_risc.v"
-`include "./core/cache_2way.v"
+`include "./core/i_cache.v"
+`include "./core/d_cache.v"
 
 module CHIP (	clk,
 				rst_n,
@@ -89,7 +90,7 @@ wire [31:0] DCACHE_rdata;
 	);
 	
 
-	cache D_cache(
+	d_cache D_cache(
         .clk        (clk)         ,
         .proc_reset (~rst_n)      ,
         .proc_read  (DCACHE_ren)  ,
@@ -106,7 +107,7 @@ wire [31:0] DCACHE_rdata;
         .mem_ready  (mem_ready_D)
 	);
 
-	cache I_cache(
+	i_cache I_cache(
         .clk        (clk)         ,
         .proc_reset (~rst_n)      ,
         .proc_read  (ICACHE_ren)  ,
