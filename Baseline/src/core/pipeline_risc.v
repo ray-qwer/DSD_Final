@@ -54,6 +54,7 @@ module RISCV_Pipeline(clk,
 
     //----------pipeline wires-------
     wire [31:0] IF_ID_PC_4, IF_ID_PC, IF_ID_ICACHE_rdata;
+    wire [4:0] IF_ID_rs1, IF_ID_rs2;
     wire IF_ID_ICACHE_stall;
     assign IF_ID_PC_4 = IF_ID[96:65];
     assign IF_ID_ICACHE_stall = IF_ID[64];
@@ -118,8 +119,8 @@ module RISCV_Pipeline(clk,
                             (ID_EX_ctrl_M[1]) && // previous inst.(load) has MemRead 
                             ~(ID_EX_rd == 5'b0) && 
                             (   
-                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
-                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                                (ID_EX_rd == IF_ID_rs1) ||
+                                (ID_EX_rd == IF_ID_rs2)
                             )
                             );
     assign ID_EX_ctrl_next =    (
@@ -138,16 +139,16 @@ module RISCV_Pipeline(clk,
                                     (ID_EX_ctrl_M[1]) &&
                                     ~(ID_EX_rd == 5'b0) && 
                                     (   
-                                        (ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
-                                        (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                                        (ID_EX_rd == IF_ID_rs1) ||
+                                        (ID_EX_rd == IF_ID_rs2)
                                     )
                                 ) || // previous is a load
                                 (
                                     (EX_MEM_ctrl_M[1]) &&
                                     ~(EX_MEM_rd == 5'b0) && 
                                     (   
-                                        (EX_MEM_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
-                                        (EX_MEM_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                                        (EX_MEM_rd == IF_ID_rs1) ||
+                                        (EX_MEM_rd == IF_ID_rs2)
                                     )
                                 ) // second previous is a load
                             ) &&
@@ -158,13 +159,15 @@ module RISCV_Pipeline(clk,
                             (ID_EX_ctrl_WB[1]) && // previous inst. has RegWrite
                             ~(ID_EX_rd == 5'b0) && 
                             (
-                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}) ||
-                                (ID_EX_rd == {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}})
+                                (ID_EX_rd == IF_ID_rs1) ||
+                                (ID_EX_rd == IF_ID_rs2)
                             ) &&
                             (ctrlSignal[2]) // now branch
                             );
 
     // assign
+    assign IF_ID_rs1 = {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}};
+    assign IF_ID_rs2 = {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}};
     assign ALUData1 =   (forward_ctrl_EX_1 == 2'b00)?   ID_EX_rData1:
                         (forward_ctrl_EX_1 == 2'b01)?   wData:
                         (forward_ctrl_EX_1 == 2'b10)?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
@@ -221,18 +224,18 @@ module RISCV_Pipeline(clk,
 
         if (((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz))) begin
             IF_ID_next[96:65] = AddrNext;
-            IF_ID_next[64] = ICACHE_stall;
             IF_ID_next[63:32] = PC;
             IF_ID_next[31:0] = ICACHE_rdata;
-            if ((ctrlSignal[0] || beq || ctrlSignal[1] || bne)) begin // branch taken / Jar / Jarl flush
+            if ((beq || bne || ctrlSignal[8])) begin // branch taken / Jar / Jarl flush
                 IF_ID_next = 97'b0;
             end
         end
         else begin
             IF_ID_next = IF_ID;
         end
+        IF_ID_next[64] = ICACHE_stall;
 
-        if ((~ICACHE_stall) && (~DCACHE_stall)) begin
+        if ((~DCACHE_stall)) begin
             ID_EX_next[155] = ID_EX_ctrl_next[8];
             ID_EX_next[154:123] = IF_ID_PC_4;
             ID_EX_next[122:119] = {{IF_ID_ICACHE_rdata[6]}, {IF_ID_ICACHE_rdata[22:20]}};
@@ -294,8 +297,8 @@ module RISCV_Pipeline(clk,
     end
     
     // module     
-    Reg_File RF(.rs1({{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}),
-                .rs2({{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}}),
+    Reg_File RF(.rs1(IF_ID_rs1),
+                .rs2(IF_ID_rs2),
                 .wData(wData),
                 .rd(MEM_WB_rd),
                 .rData1(rData1),
@@ -335,8 +338,8 @@ module RISCV_Pipeline(clk,
     
     Forward forward(.ID_EX_rs1(ID_EX_rs1),
                     .ID_EX_rs2(ID_EX_rs2),
-                    .IF_ID_rs1({{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}}),
-                    .IF_ID_rs2({{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}}),
+                    .IF_ID_rs1(IF_ID_rs1),
+                    .IF_ID_rs2(IF_ID_rs2),
                     .EX_MEM_rd(EX_MEM_rd),
                     .MEM_WB_rd(MEM_WB_rd),
                     .MEM_WB_RegWrite(MEM_WB_ctrl_WB[1]),
