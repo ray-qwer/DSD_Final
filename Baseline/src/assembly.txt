@@ -1,0 +1,56 @@
+nop
+jal  x0  Main
+sw   x8  x0  0x040
+jalr x0  x1  0x000           # return OutputTestPort
+addi x11 x0  0x010           # number = 16
+addi x9  x0  0x000           # f(0) = 0
+addi x10 x0  0x001           # f(1) = 1
+addi x15 x0  0x000           # 0x0000 stores f(0)
+sw   x9  x15 0x000
+addi x15 x15 0x004           # 0x0004 stores f(1)
+sw   x10 x15 0x000
+addi x8  x9  0x000
+jal  x1  OutputTestPort
+addi x8  x10 0x000
+jal  x1  OutputTestPort
+addi x12 x0  0x002           # i = 2
+add  x10 x10 x9              # f(i  ) = f(i-1) + f(i-2), r10 = f(i  )
+sub  x9  x10 x9              # f(i-1) = f(i  ) - f(i-2), r9  = f(i-1)
+addi x15 x15 0x004           # next address for storing f(i)
+sw   x10 x15 0x000
+addi x8  x10 0x000
+jal  x1  OutputTestPort
+addi x12 x12 0x001           # i = i+1
+bne  x12 x11 FibonacciLoop   # continue FibonacciLoop
+jalr x0  x2  0x000           # return FibonacciSeries
+addi x9  x0  0x03C           # x9  = 4*(number-1)
+addi x10 x0  0x000           # x10 = 4*i = 0
+sub  x12 x9  x10             # x12 = 4*(number-1-i)
+addi x11 x0  0x000           # x11 = 4*j = 0
+lw   x13 x11 0x000           # x13 = arr[j  ]
+lw   x14 x11 0x004           # x14 = arr[j+1]
+slt  x15 x13 x14             # x15 = (x13 < x14)
+beq  x15 x0  SwapExit        # if (!(x13 < x14)) skip swap
+sw   x14 x11 0x000
+sw   x13 x11 0x004
+addi x11 x11 0x004           # j=j+1, x11 = 4*j
+bne  x11 x12 BubbleInLoop    # continue BubbleInLoop
+addi x10 x10 0x004           # i=i+1, x10 = 4*i
+bne  x10 x9  BubbleOutLoop   # continue BubbleOutLoop
+addi x9  x0  0x040           # x9  = 4*number
+addi x10 x0  0x000           # x10 = 4*k = 0
+lw   x8  x10 0x000           # x8 = arr[k]
+jal  x1  OutputTestPort
+addi x10 x10 0x004           # k=k+1, x10 = 4*k
+bne  x10 x9  BubbleOutput    # continue BubbleOutput
+jalr x0  x2  0x000           # return BubbleSort
+addi x8  x0  0x168
+jal  x1  OutputTestPort
+addi x16 x0  Main
+addi x17 x0  Main
+jalr x2  x16 FibonacciSeries
+jalr x2  x17 BubbleSort
+addi x8  x0  0xD5D
+jal  x1  OutputTestPort
+nop
+nop
