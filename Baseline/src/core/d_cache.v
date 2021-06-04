@@ -192,10 +192,10 @@ always@(*) begin
                         2'b00:
                         begin
                             proc_stall = 1;
-                            if (dirty)
-                                mem_write = 1;
-                            else
-                                mem_read = 1;
+                            // if (dirty)
+                            //     mem_write = 1;
+                            // else
+                            //     mem_read = 1;
                         end
                     endcase
                 end

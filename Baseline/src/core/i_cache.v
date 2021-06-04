@@ -144,6 +144,7 @@ always@(*) begin
                         begin
                             proc_stall = 1;
                             mem_read = 1;
+                            mem_addr = {tag, idx};
                         end
                     endcase
                 end
