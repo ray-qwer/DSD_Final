@@ -10,8 +10,9 @@ def readfile(fname):
     f = open(fname, "r")
     for line in f:
         line = line.split('//')
-        if len(line) < 3: continue # not instr
-        instr = line[0].replace('_', '')
+        if len(line) == 1: break # not instr
+        instr = line[1].replace('_', '')
+        instr = instr.replace(' ', '')
         instr_list.append(instr)
         
     instr_list = [x for x in instr_list if x != '']
@@ -82,7 +83,7 @@ def exec_instr(instr_list, curr_idx, registers):
     # decode instruction
     Op, rs1, rs2, rd, funct3, funct7, imm, shamt = instr_decode(curr_instr)
     
-    print(f'addr:{hex(curr_idx * 4)}, instr:{hex(int(curr_instr, 2))}')
+    print(f'addr:{hex(curr_idx * 4)}, instr:{hex(int(curr_instr, 2))}, PC_word:{hex(curr_idx)}, ')
 
     # execute instruction
     if int(curr_instr, 2) == 19: print('nop')
@@ -236,7 +237,6 @@ if __name__ == "__main__":
     # get all instructions
     instr_list = []
     instr_list = readfile(fname)
-    print("length of instr list: ", len(instr_list))
 
     # repeat check
     repeat = dict();
