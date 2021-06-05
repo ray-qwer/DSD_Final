@@ -177,13 +177,12 @@ always@(*) begin
     case(i_state)
         IDLE:
             begin
-                if ((l1i_read || l1i_write) && !i_hit) begin  
-                    // ALLOCATE, WRITE_BACK
-                    if (i_dirty)
-                        memi_write = 1;
-                    else
-                        memi_read = 1;
-                end
+                // if ((l1i_read || l1i_write) && !i_hit) begin  
+                //     if (i_dirty)
+                //         memi_write = 1;
+                //     else
+                //         memi_read = 1;
+                // end
             end
         ACCESS_CACHE:
             begin
@@ -221,13 +220,12 @@ always@(*) begin
     case(d_state)
         IDLE:
             begin
-                if ((l1d_read || l1d_write) && !d_hit) begin  
-                    // ALLOCATE, WRITE_BACK
-                    if (d_dirty)
-                        memd_write = 1;
-                    else
-                        memd_read = 1;
-                end
+                // if ((l1d_read || l1d_write) && !d_hit) begin  
+                //     if (d_dirty)
+                //         memd_write = 1;
+                //     else
+                //         memd_read = 1;
+                // end
             end
         ACCESS_CACHE:
             begin
