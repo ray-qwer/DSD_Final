@@ -165,14 +165,14 @@ module RISCV_Pipeline(clk,
     // assign
     assign IF_ID_rs1 = {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}};
     assign IF_ID_rs2 = {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}};
-    assign ALUData1 =   (forward_ctrl_EX_1 == 2'b00)?   ID_EX_rData1:
-                        (forward_ctrl_EX_1 == 2'b01)?   wData:
-                        (forward_ctrl_EX_1 == 2'b10)?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
-                                                        32'b0;
-    assign ALUData2_preimm =    (forward_ctrl_EX_2 == 2'b00)?   ID_EX_rData2:
-                                (forward_ctrl_EX_2 == 2'b01)?   wData:
-                                (forward_ctrl_EX_2 == 2'b10)?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
-                                                                32'b0;
+    assign ALUData1 =   ((~forward_ctrl_EX_1[1]) && (~forward_ctrl_EX_1[0]))?   ID_EX_rData1:
+                        ((~forward_ctrl_EX_1[1]) && (forward_ctrl_EX_1[0]))?    wData:
+                        ((forward_ctrl_EX_1[1]) && (~forward_ctrl_EX_1[0]))?    ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+                                                                                32'b0;
+    assign ALUData2_preimm =    ((~forward_ctrl_EX_2[1]) && (~forward_ctrl_EX_2[0]))?   ID_EX_rData2:
+                                ((~forward_ctrl_EX_2[1]) && (forward_ctrl_EX_2[0]))?    wData:
+                                ((forward_ctrl_EX_2[1]) && (~forward_ctrl_EX_2[0]))?    ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+                                                                                        32'b0;
     assign ALUData2 = (ID_EX_ctrl_EX[0])? ID_EX_Imm : ALUData2_preimm;
 
     assign wData = (MEM_WB_Jin)? {MEM_WB_PC_4} : wDataFin;
@@ -186,13 +186,13 @@ module RISCV_Pipeline(clk,
     // PC logic
     wire equal, beq, bne;
     wire [31:0] Jal_or_Jalr_data, Addr_jump, forwarded_rdata1, forwarded_rdata2;
-    assign forwarded_rdata1 =   (forward_ctrl_ID_1 == 2'b00)?   rData1:
-                            (forward_ctrl_ID_1 == 2'b01)?   wData:
-                            (forward_ctrl_ID_1 == 2'b10)?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+    assign forwarded_rdata1 =   ((~forward_ctrl_ID_1[1]) && (~forward_ctrl_ID_1[0]))?   rData1:
+                            ((~forward_ctrl_ID_1[1]) && (forward_ctrl_ID_1[0]))?   wData:
+                            ((forward_ctrl_ID_1[1]) && (~forward_ctrl_ID_1[0]))?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
                                                             32'b0;
-    assign forwarded_rdata2 =   (forward_ctrl_ID_2 == 2'b00)?   rData2:
-                            (forward_ctrl_ID_2 == 2'b01)?   wData:
-                            (forward_ctrl_ID_2 == 2'b10)?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+    assign forwarded_rdata2 =   ((~forward_ctrl_ID_2[1]) && (~forward_ctrl_ID_2[0]))?   rData2:
+                            ((~forward_ctrl_ID_2[1]) && (forward_ctrl_ID_2[0]))?   wData:
+                            ((forward_ctrl_ID_2[1]) && (~forward_ctrl_ID_2[0]))?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
                                                             32'b0;
     assign equal = (forwarded_rdata1 == forwarded_rdata2);
     assign bne = (IF_ID_ICACHE_rdata[20] && (~equal) && ctrlSignal[2]);
@@ -207,7 +207,7 @@ module RISCV_Pipeline(clk,
     // assign AddrFin =    (ctrlSignal[0])?                AddrJalrPre:
     //                     (beq || ctrlSignal[1] || bne)?  AddrJalPre:
     //                                                     AddrNext;
-    assign AddrFin = (ctrlSignal[0] || beq || ctrlSignal[1] || bne)?    Addr_jump:
+    assign AddrFin = (ctrlSignal[8] || beq || bne)?    Addr_jump:
                                                                         AddrNext;
 
     // combinatial
@@ -312,7 +312,6 @@ module RISCV_Pipeline(clk,
                 MEM_WB <= 0;
             end
             CPU_state <= CPU_state_next;
-
         end
     end
     
