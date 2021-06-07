@@ -47,7 +47,7 @@ module RISCV_Pipeline(clk,
     reg [31:0] PC_next;
 
     //----------pipeline registers-------
-    reg [96:0] IF_ID, IF_ID_next; 
+    reg [95:0] IF_ID, IF_ID_next; 
     reg [155:0] ID_EX, ID_EX_next; 
     reg [96:0] EX_MEM, EX_MEM_next; 
     reg [93:0] MEM_WB, MEM_WB_next; 
@@ -55,9 +55,7 @@ module RISCV_Pipeline(clk,
     //----------pipeline wires-------
     wire [31:0] IF_ID_PC_4, IF_ID_PC, IF_ID_ICACHE_rdata;
     wire [4:0] IF_ID_rs1, IF_ID_rs2;
-    wire IF_ID_ICACHE_stall;
-    assign IF_ID_PC_4 = IF_ID[96:65];
-    assign IF_ID_ICACHE_stall = IF_ID[64];
+    assign IF_ID_PC_4 = IF_ID[95:64];
     assign IF_ID_PC = IF_ID[63:32];
     assign IF_ID_ICACHE_rdata = IF_ID[31:0];
 
@@ -125,7 +123,6 @@ module RISCV_Pipeline(clk,
                             );
     assign ID_EX_ctrl_next =    (
                                 load_EXuse_haz || 
-                                IF_ID_ICACHE_stall ||
                                 load_IDuse_haz ||
                                 ALU_IDuse_haz
                                 )?                      9'b0:
@@ -223,7 +220,7 @@ module RISCV_Pipeline(clk,
         end
 
         if (((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz))) begin
-            IF_ID_next[96:65] = AddrNext;
+            IF_ID_next[95:64] = AddrNext;
             IF_ID_next[63:32] = PC;
             IF_ID_next[31:0] = ICACHE_rdata;
             if ((beq || bne || ctrlSignal[8])) begin // branch taken / Jar / Jarl flush
@@ -233,9 +230,8 @@ module RISCV_Pipeline(clk,
         else begin
             IF_ID_next = IF_ID;
         end
-        IF_ID_next[64] = ICACHE_stall;
 
-        if ((~DCACHE_stall)) begin
+        if ((~DCACHE_stall) && (~ICACHE_stall)) begin
             ID_EX_next[155] = ID_EX_ctrl_next[8];
             ID_EX_next[154:123] = IF_ID_PC_4;
             ID_EX_next[122:119] = {{IF_ID_ICACHE_rdata[6]}, {IF_ID_ICACHE_rdata[22:20]}};
@@ -278,21 +274,45 @@ module RISCV_Pipeline(clk,
 
     end
 
+    reg CPU_state, CPU_state_next;
+
+    always @(*) begin
+        case(CPU_state)
+            1'b0: begin
+                if (!rst_n) CPU_state_next = 1'b0;
+                else CPU_state_next = 1'b1;
+            end
+            1'b1: CPU_state_next = 1'b1;
+        endcase
+    end
+
     // sequential
     always @(posedge clk) begin
         if (!rst_n) begin
             PC <= 32'b0;
+            CPU_state <= 0;
             IF_ID <= 0;
             ID_EX <= 0;
             EX_MEM <= 0;
             MEM_WB <= 0;
         end
         else begin
-            PC <= PC_next;
-            IF_ID <= IF_ID_next;
-            ID_EX <= ID_EX_next;
-            EX_MEM <= EX_MEM_next;
-            MEM_WB <= MEM_WB_next;
+            if (CPU_state) begin
+                PC <= PC_next;
+                IF_ID <= IF_ID_next;
+                ID_EX <= ID_EX_next;
+                EX_MEM <= EX_MEM_next;
+                MEM_WB <= MEM_WB_next;
+            end
+            else begin
+                PC <= 0;
+                IF_ID <= 0;
+                ID_EX <= 0;
+                EX_MEM <= 0;
+                MEM_WB <= 0;
+            end
+            CPU_state <= CPU_state_next;
+
         end
     end
     
@@ -397,39 +417,6 @@ module Reg_File( rs1,
     end
 
 endmodule
-// module Reg_File(clk,
-//                 rst_n,
-//                 rs1,
-//                 rs2,
-//                 rd,
-//                 rData1,
-//                 rData2,
-//                 wData,
-//                 Reg_write);
-
-//     input [4:0] rs1, rs2, rd;
-//     input clk, rst_n, Reg_write;
-//     input [31:0] wData;
-//     output [31:0] rData1, rData2;
-//     integer i;
-
-//     reg [31:0] RF [31:0];
-
-//     assign    rData1 = RF[rs1];
-//     assign    rData2 = RF[rs2];
-
-//     wire [31:0] dec = (Reg_write << rd);
-//     always @(posedge clk) begin
-//         if (!rst_n) begin
-//             for(i = 0; i < 32; i = i + 1) RF[i] <= 32'b0;
-//         end
-//         else begin
-//             RF[0] <= 32'b0;
-//             for(i = 1; i < 32; i = i + 1) RF[i] <= dec[i]? wData : RF[i];
-//         end
-//     end
-
-// endmodule
 
 module ALU( rd1,
             rd2,
