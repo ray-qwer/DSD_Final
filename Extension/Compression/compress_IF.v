@@ -8,7 +8,8 @@ module compress_IF(
     rst,
     PC,
     ins_icache,
-    stall
+    stall,
+    ICACHE_stall
 );
 
 // addr: input address, from CPU
@@ -17,7 +18,7 @@ module compress_IF(
 // ins_icache: words from icache
 // ins_IF: to IF/ID
 input [31:0] addr,ins_icache;
-input jb,clk,rst;
+input jb,clk,rst,ICACHE_stall;
 output reg [31:0] addrNext;
 output reg [31:0] ins_IF,PC;
 output stall;
@@ -44,7 +45,7 @@ assign compressChecking = (ins_icache[25:24] != 2'b11);
 assign storeIsCompress = (store[9:8] != 2'b11);
 
 // module
-CompressX DC(.ins_c(ins_com), .ins_d(ins_decom));
+CompressX DC(.ins_cbi(ins_com), .ins_dbi(ins_decom));
 
 // combinatial isCompress
 always @(*) begin
@@ -122,7 +123,10 @@ assign stall = (state == JPLUS);
 always @(posedge clk) begin
     if (!rst)begin
         store <= 16'b0;
-    end   
+    end 
+    else if (ICACHE_stall) begin
+        store <= store;
+    end  
     else begin
         store <= storeNext;
     end
