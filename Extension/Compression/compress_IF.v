@@ -33,7 +33,7 @@ reg [15:0] store, storeNext,ins_com;
 wire compressChecking;
 wire storeIsCompress;
 wire [31:0] ins_decom;
-
+wire jCompressChecking;
 // state parameter
 parameter IDLE = 2'b00;
 parameter PLUS2 = 2'b01;
@@ -43,7 +43,7 @@ parameter JPLUS = 2'b10;
 assign addr_nword = {{addr[31:2] + 1'b1},2'b0};
 assign compressChecking = (ins_icache[25:24] != 2'b11); 
 assign storeIsCompress = (store[9:8] != 2'b11);
-
+assign jCompressChecking = (ins_icache[1:0] != 2'b11);
 // module
 CompressX DC(.ins_cbi(ins_com), .ins_dbi(ins_decom));
 
@@ -58,17 +58,17 @@ always @(*) begin
                 ins_IF = ins_decom;
             end
             else begin
-                storeNext = 16'b0;
+                storeNext = {6'b0,2'b11,8'b0};
                 ins_com = 16'b0;
                 ins_IF = ins_icache;
             end
         end
         JPLUS:  begin
             PC = addr;
-            if (compressChecking) begin
-                storeNext = 16'b0;
+            if (jCompressChecking) begin
                 ins_com = ins_icache[15:0];
                 ins_IF = ins_decom;
+                storeNext = {6'b0,2'b11,8'b0};
             end
             else begin
                 // stall and to state PLUS2, which means addr not change, jb = 1'b0
@@ -80,7 +80,7 @@ always @(*) begin
         PLUS2:  begin
             if (storeIsCompress) begin
                 PC = addr;
-                storeNext = 16'b0;
+                storeNext = {6'b0,2'b11,8'b0};
                 ins_com = store;
                 ins_IF = ins_decom;
             end 
@@ -93,7 +93,7 @@ always @(*) begin
         end
         default: begin
             PC = addr;
-            storeNext = 16'b0;
+            storeNext = {6'b0,2'b11,8'b0};
             ins_com = 16'b0;
             ins_IF = 32'b0;
         end
@@ -113,6 +113,9 @@ always @(*) begin
         JPLUS:  begin
             if (compressChecking) addrNext = addr + 32'd2;
             else addrNext = addr + 32'd4;
+        end
+        default: begin
+            addrNext = addr + 32'd4;
         end
     endcase
 end
