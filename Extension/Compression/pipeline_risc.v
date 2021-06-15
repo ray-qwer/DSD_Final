@@ -122,11 +122,12 @@ module RISCV_Pipeline(clk,
     wire I_stall;
     wire [31:0] CompAddr;
     wire [31:0] CompIns;
+    wire CPU_stall;
     assign ICACHE_addr = CompAddr[31:2];
     assign jb_in = jb;
     assign I_stall = ICACHE_stall | Compstall;
     assign addr = PC;
-    
+    assign CPU_stall = ~((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz));
     
 
     assign load_EXuse_haz = (
@@ -228,8 +229,11 @@ module RISCV_Pipeline(clk,
 
     // combinatial
     always @(*) begin
-        jb_next = ctrlSignal[8] || beq || bne;
         if (Compstall) jb_next = 1'b0;
+        else if ((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz)) begin
+            jb_next = ctrlSignal[8] || beq || bne;
+        end
+        else jb_next = jb;
     end
     
     always @(*) begin
@@ -308,7 +312,7 @@ module RISCV_Pipeline(clk,
     end
 
     // sequential
-    always @(*) begin
+    always @(posedge clk) begin
         jb <= jb_next;
     end
     
@@ -405,7 +409,7 @@ module RISCV_Pipeline(clk,
                         .PC(CompAddr),
                         .ins_icache(ICACHE_rdata),
                         .stall(Compstall),
-                        .ICACHE_stall(ICACHE_stall)
+                        .CPU_stall(CPU_stall)
     );
 endmodule
 

@@ -9,7 +9,7 @@ module compress_IF(
     PC,
     ins_icache,
     stall,
-    ICACHE_stall
+    CPU_stall
 );
 
 // addr: input address, from CPU
@@ -18,7 +18,7 @@ module compress_IF(
 // ins_icache: words from icache
 // ins_IF: to IF/ID
 input [31:0] addr,ins_icache;
-input jb,clk,rst,ICACHE_stall;
+input jb,clk,rst,CPU_stall;
 output reg [31:0] addrNext;
 output reg [31:0] ins_IF,PC;
 output stall;
@@ -120,14 +120,14 @@ always @(*) begin
     endcase
 end
 // stall when JPLUS
-assign stall = (state == JPLUS);
+assign stall = ((state == JPLUS) & ~jCompressChecking);
 
 // sequential
 always @(posedge clk) begin
     if (!rst)begin
         store <= 16'b0;
     end 
-    else if (ICACHE_stall) begin
+    else if (CPU_stall) begin
         store <= store;
     end  
     else begin

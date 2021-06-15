@@ -4,6 +4,7 @@ module CompressX(
 );
 input [15:0] ins_cbi;       // big indian
 output [31:0] ins_dbi;  // big indian
+// assign ins_dbi = 32'b0;
 wire [15:0] ins_c;
 reg [31:0] ins_d;
 assign ins_c = {ins_cbi[7:0],ins_cbi[15:8]};
@@ -41,7 +42,7 @@ always @(*) begin
                     // C.JAL => jal x1, imm, sign-extended
                     ins_d = {ins_c[12],ins_c[8],ins_c[10:9],ins_c[6],ins_c[7],ins_c[2],ins_c[11],ins_c[5:3],ins_c[12],{8{ins_c[12]}},5'b00001,7'b1101111};
                 end
-                3'b110: begin
+                3'b100: begin
                     // C.SRAI, C.SRLI, C.ANDI
                     case(ins_c[11:10]) 
                         2'b00: begin
@@ -54,7 +55,7 @@ always @(*) begin
                         end
                         2'b10: begin
                             // C.ANDI,sign-extended
-                            ins_d = {{7{ins_c[12]}},ins_c[6:2],2'b01,ins_c[9:7],3'b101,2'b01,ins_c[9:7],7'b0010011};
+                            ins_d = {{7{ins_c[12]}},ins_c[6:2],2'b01,ins_c[9:7],3'b111,2'b01,ins_c[9:7],7'b0010011};
                         end
                         default: begin
                             // not exist
@@ -72,7 +73,7 @@ always @(*) begin
                 end
                 3'b111: begin
                     // C.BNEZ,sign-extended
-                    ins_d = {{3{ins_c[12]}},ins_c[12],ins_c[6:5],ins_c[2],5'b0,2'b01,ins_c[9:7],3'b000,ins_c[11:10],ins_c[4:3],ins_c[12],7'b1100011};
+                    ins_d = {{3{ins_c[12]}},ins_c[12],ins_c[6:5],ins_c[2],5'b0,2'b01,ins_c[9:7],3'b001,ins_c[11:10],ins_c[4:3],ins_c[12],7'b1100011};
                 end
                 default: begin
                     // not exist!
@@ -106,7 +107,9 @@ always @(*) begin
                         end
                         else begin
                             // C.MV -> add rd, x0, rs2
-                            ins_d = {7'b0,ins_c[6:2],5'b0,3'b000,ins_c[11:7],7'b0110011};
+                            // ins_d = {7'b0,ins_c[6:2],5'b0,3'b000,ins_c[11:7],7'b0110011};
+                            ins_d = {12'b0,ins_c[6:2],3'b000,ins_c[11:7],7'b0010011};
+
                         end
                     end
                 end
