@@ -45,9 +45,10 @@ module RISCV_Pipeline(clk,
     wire [3:0] alu_ctrl;
     reg [31:0] PC;
     reg [31:0] PC_next;
+    reg DinI_state, DinI_state_next; // handle dstall appears while istall
 
     //----------pipeline registers-------
-    reg [95:0] IF_ID, IF_ID_next; 
+    reg [96:0] IF_ID, IF_ID_next; 
     reg [155:0] ID_EX, ID_EX_next; 
     reg [96:0] EX_MEM, EX_MEM_next; 
     reg [93:0] MEM_WB, MEM_WB_next; 
@@ -55,6 +56,8 @@ module RISCV_Pipeline(clk,
     //----------pipeline wires-------
     wire [31:0] IF_ID_PC_4, IF_ID_PC, IF_ID_ICACHE_rdata;
     wire [4:0] IF_ID_rs1, IF_ID_rs2;
+    wire IF_ID_Istall;
+    assign IF_ID_Istall = IF_ID[96];
     assign IF_ID_PC_4 = IF_ID[95:64];
     assign IF_ID_PC = IF_ID[63:32];
     assign IF_ID_ICACHE_rdata = IF_ID[31:0];
@@ -122,9 +125,12 @@ module RISCV_Pipeline(clk,
                             )
                             );
     assign ID_EX_ctrl_next =    (
-                                load_EXuse_haz || 
-                                load_IDuse_haz ||
-                                ALU_IDuse_haz
+                                load_EXuse_haz  
+                                || load_IDuse_haz 
+                                || ALU_IDuse_haz 
+                                || ((ctrlSignal[2]) && (~ICACHE_stall) && (~DCACHE_stall))
+                                || IF_ID_Istall
+                                || DinI_state
                                 )?                      9'b0:
                                                         {{ctrlSignal[8]}, {ctrlSignal[7]}, {ctrlSignal[6]}, {ctrlSignal[5]}, {ctrlSignal[4]}, {ctrlSignal[3]}, {ctrlSignal[2]}, {ALUOp}};
     assign MEM_WB_ctrl_next = (DCACHE_stall)?   2'b0:
@@ -231,7 +237,12 @@ module RISCV_Pipeline(clk,
             IF_ID_next = IF_ID;
         end
 
-        if ((~DCACHE_stall) && (~ICACHE_stall)) begin
+        if (((~load_EXuse_haz) && (~DCACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz))) begin
+            IF_ID_next[96] = ICACHE_stall;
+        end
+        else IF_ID_next[96] = IF_ID[96];
+
+        if ((~DCACHE_stall)) begin
             ID_EX_next[155] = ID_EX_ctrl_next[8];
             ID_EX_next[154:123] = IF_ID_PC_4;
             ID_EX_next[122:119] = {{IF_ID_ICACHE_rdata[6]}, {IF_ID_ICACHE_rdata[22:20]}};
@@ -267,11 +278,6 @@ module RISCV_Pipeline(clk,
 
             MEM_WB_next = MEM_WB;
         end
-
-        if ((ctrlSignal[2]) && (~ICACHE_stall) && (~DCACHE_stall)) begin
-            ID_EX_next = 122'b0;
-        end
-
     end
 
     reg CPU_state, CPU_state_next;
@@ -286,11 +292,25 @@ module RISCV_Pipeline(clk,
         endcase
     end
 
+    always @(*) begin
+        case(DinI_state)
+            1'b0: begin
+                if (IF_ID_Istall && DCACHE_stall) DinI_state_next = 1'b1;
+                else DinI_state_next = 1'b0;
+            end
+            1'b1: begin
+                if (!DCACHE_stall) DinI_state_next = 1'b0;
+                else DinI_state_next = 1'b1;
+            end
+        endcase
+    end
+
     // sequential
     always @(posedge clk) begin
         if (!rst_n) begin
             PC <= 32'b0;
             CPU_state <= 0;
+            DinI_state <= 0;
             IF_ID <= 0;
             ID_EX <= 0;
             EX_MEM <= 0;
@@ -299,6 +319,7 @@ module RISCV_Pipeline(clk,
         else begin
             if (CPU_state) begin
                 PC <= PC_next;
+                DinI_state <= DinI_state_next;
                 IF_ID <= IF_ID_next;
                 ID_EX <= ID_EX_next;
                 EX_MEM <= EX_MEM_next;
@@ -306,6 +327,7 @@ module RISCV_Pipeline(clk,
             end
             else begin
                 PC <= 0;
+                DinI_state <= 0;
                 IF_ID <= 0;
                 ID_EX <= 0;
                 EX_MEM <= 0;
