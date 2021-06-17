@@ -40,7 +40,7 @@ module RISCV_Pipeline(clk,
     // 0: Jalr, 1: Jal, 2: Branch, 3: MemRead, 4:MemtoReg, 5: MemWrite
     // 6: ALUSrc 7: RegWrite, 8: Jin
     wire [1:0] ALUOp; 
-    wire [31:0] rData1, rData2, Imm, ALUData1, ALUData2, ALUData2_preimm, ALUout, MemAddr, wData, wDataFin;
+    wire [31:0] rData1, rData2, Imm, ALUData1, ALUData2, ALUData2_preimm, ALUout, MemAddr, wDataFin, MEM_WB_wData_next;
     wire [31:0] AddrNext, AddrJalPre, AddrJalrPre, AddrFin;
     wire [3:0] alu_ctrl;
     reg [31:0] PC;
@@ -95,15 +95,12 @@ module RISCV_Pipeline(clk,
     assign EX_MEM_ALUData2 = EX_MEM[36:5];
     assign EX_MEM_rd = EX_MEM[4:0];
 
-    wire [31:0] MEM_WB_PC_4, MEM_WB_DCACHE_rdata, MEM_WB_ALUout;
+    wire [31:0] MEM_WB_DCACHE_rdata, MEM_WB_wData;
     wire [4:0] MEM_WB_rd;
     wire [1:0] MEM_WB_ctrl_WB;
-    wire MEM_WB_Jin;
-    assign MEM_WB_Jin = MEM_WB[93];
-    assign MEM_WB_PC_4 = MEM_WB[92:71];
     assign MEM_WB_ctrl_WB = MEM_WB[70:69];    // RegWrite, MemtoReg
     assign MEM_WB_DCACHE_rdata = MEM_WB[68:37];
-    assign MEM_WB_ALUout = MEM_WB[36:5];
+    assign MEM_WB_wData = MEM_WB[36:5];
     assign MEM_WB_rd = MEM_WB[4:0];
 
     //----------forward wires-------
@@ -133,8 +130,8 @@ module RISCV_Pipeline(clk,
                                 || DinI_state
                                 )?                      9'b0:
                                                         {{ctrlSignal[8]}, {ctrlSignal[7]}, {ctrlSignal[6]}, {ctrlSignal[5]}, {ctrlSignal[4]}, {ctrlSignal[3]}, {ctrlSignal[2]}, {ALUOp}};
-    assign MEM_WB_ctrl_next = (DCACHE_stall)?   2'b0:
-                                                EX_MEM_ctrl_WB;
+
+    assign MEM_WB_ctrl_next = EX_MEM_ctrl_WB;
 
     assign load_IDuse_haz = (
                             (
@@ -169,36 +166,36 @@ module RISCV_Pipeline(clk,
                             );
 
     // assign
+    assign MEM_WB_wData_next = (EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout;
     assign IF_ID_rs1 = {{IF_ID_ICACHE_rdata[11:8]}, {IF_ID_ICACHE_rdata[23]}};
     assign IF_ID_rs2 = {{IF_ID_ICACHE_rdata[0]}, {IF_ID_ICACHE_rdata[15:12]}};
     assign ALUData1 =   ((~forward_ctrl_EX_1[1]) && (~forward_ctrl_EX_1[0]))?   ID_EX_rData1:
-                        ((~forward_ctrl_EX_1[1]) && (forward_ctrl_EX_1[0]))?    wData:
-                        ((forward_ctrl_EX_1[1]) && (~forward_ctrl_EX_1[0]))?    ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+                        ((~forward_ctrl_EX_1[1]) && (forward_ctrl_EX_1[0]))?    wDataFin:
+                        ((forward_ctrl_EX_1[1]) && (~forward_ctrl_EX_1[0]))?    (MEM_WB_wData_next):
                                                                                 32'b0;
     assign ALUData2_preimm =    ((~forward_ctrl_EX_2[1]) && (~forward_ctrl_EX_2[0]))?   ID_EX_rData2:
-                                ((~forward_ctrl_EX_2[1]) && (forward_ctrl_EX_2[0]))?    wData:
-                                ((forward_ctrl_EX_2[1]) && (~forward_ctrl_EX_2[0]))?    ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+                                ((~forward_ctrl_EX_2[1]) && (forward_ctrl_EX_2[0]))?    wDataFin:
+                                ((forward_ctrl_EX_2[1]) && (~forward_ctrl_EX_2[0]))?    (MEM_WB_wData_next):
                                                                                         32'b0;
     assign ALUData2 = (ID_EX_ctrl_EX[0])? ID_EX_Imm : ALUData2_preimm;
 
-    assign wData = (MEM_WB_Jin)? {MEM_WB_PC_4} : wDataFin;
     assign DCACHE_wen = EX_MEM_ctrl_M[0];
     assign DCACHE_ren = EX_MEM_ctrl_M[1];
     assign DCACHE_addr = EX_MEM_ALUout[31:2];
     assign DCACHE_wdata = {{EX_MEM_ALUData2[7:0]}, {EX_MEM_ALUData2[15:8]}, {EX_MEM_ALUData2[23:16]}, {EX_MEM_ALUData2[31:24]}};
-    assign wDataFin = (MEM_WB_ctrl_WB[0])? {MEM_WB_DCACHE_rdata[7:0], MEM_WB_DCACHE_rdata[15:8], MEM_WB_DCACHE_rdata[23:16], MEM_WB_DCACHE_rdata[31:24]} : MEM_WB_ALUout;
+    assign wDataFin = (MEM_WB_ctrl_WB[0])? {MEM_WB_DCACHE_rdata[7:0], MEM_WB_DCACHE_rdata[15:8], MEM_WB_DCACHE_rdata[23:16], MEM_WB_DCACHE_rdata[31:24]} : MEM_WB_wData;
     assign ICACHE_addr = PC[31:2];
 
     // PC logic
     wire equal, beq, bne;
     wire [31:0] Jal_or_Jalr_data, Addr_jump, forwarded_rdata1, forwarded_rdata2;
     assign forwarded_rdata1 =   ((~forward_ctrl_ID_1[1]) && (~forward_ctrl_ID_1[0]))?   rData1:
-                            ((~forward_ctrl_ID_1[1]) && (forward_ctrl_ID_1[0]))?   wData:
-                            ((forward_ctrl_ID_1[1]) && (~forward_ctrl_ID_1[0]))?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+                            ((~forward_ctrl_ID_1[1]) && (forward_ctrl_ID_1[0]))?   wDataFin:
+                            ((forward_ctrl_ID_1[1]) && (~forward_ctrl_ID_1[0]))?   (MEM_WB_wData_next):
                                                             32'b0;
     assign forwarded_rdata2 =   ((~forward_ctrl_ID_2[1]) && (~forward_ctrl_ID_2[0]))?   rData2:
-                            ((~forward_ctrl_ID_2[1]) && (forward_ctrl_ID_2[0]))?   wData:
-                            ((forward_ctrl_ID_2[1]) && (~forward_ctrl_ID_2[0]))?   ((EX_MEM_Jin)? EX_MEM_PC_4 : EX_MEM_ALUout):
+                            ((~forward_ctrl_ID_2[1]) && (forward_ctrl_ID_2[0]))?   wDataFin:
+                            ((forward_ctrl_ID_2[1]) && (~forward_ctrl_ID_2[0]))?   (MEM_WB_wData_next):
                                                             32'b0;
     assign equal = (forwarded_rdata1 == forwarded_rdata2);
     assign bne = (IF_ID_ICACHE_rdata[20] && (~equal) && ctrlSignal[2]);
@@ -249,8 +246,8 @@ module RISCV_Pipeline(clk,
             ID_EX_next[118:116] = {{ID_EX_ctrl_next[1:0]}, {ID_EX_ctrl_next[6]}};
             ID_EX_next[115:114] = {{ID_EX_ctrl_next[7]}, {ID_EX_ctrl_next[4]}};
             ID_EX_next[113:111] = {{ID_EX_ctrl_next[2]}, {ID_EX_ctrl_next[3]}, {ID_EX_ctrl_next[5]}};
-            ID_EX_next[110:79] = (forward_ctrl_RF_1)? wData : rData1;
-            ID_EX_next[78:47] = (forward_ctrl_RF_2)? wData : rData2;    
+            ID_EX_next[110:79] = (forward_ctrl_RF_1)? wDataFin : rData1;
+            ID_EX_next[78:47] = (forward_ctrl_RF_2)? wDataFin : rData2;    
             ID_EX_next[46:15] = Imm;
             ID_EX_next[14:10] = {{IF_ID_ICACHE_rdata[11:8]}, IF_ID_ICACHE_rdata[23]};
             ID_EX_next[9:5] = {IF_ID_ICACHE_rdata[0], {IF_ID_ICACHE_rdata[15:12]}};
@@ -264,21 +261,27 @@ module RISCV_Pipeline(clk,
             EX_MEM_next[36:5] = ALUData2_preimm;
             EX_MEM_next[4:0] = ID_EX_rd;
 
-            MEM_WB_next[93] = EX_MEM_Jin;
-            MEM_WB_next[92:71] = EX_MEM_PC_4;
-            MEM_WB_next[70:69] = MEM_WB_ctrl_next;
-            MEM_WB_next[68:37] = DCACHE_rdata;
-            MEM_WB_next[36:5] = EX_MEM_ALUout;
-            MEM_WB_next[4:0] = EX_MEM_rd;
+            // MEM_WB_next[93] = EX_MEM_Jin;
+            // MEM_WB_next[92:71] = EX_MEM_PC_4;
+            // MEM_WB_next[70:69] = MEM_WB_ctrl_next;
+            // MEM_WB_next[68:37] = DCACHE_rdata;
+            // MEM_WB_next[36:5] = EX_MEM_ALUout;
+            // MEM_WB_next[4:0] = EX_MEM_rd;
         end
         else begin
             ID_EX_next = ID_EX;
 
             EX_MEM_next = EX_MEM;
 
-            MEM_WB_next = MEM_WB;
+            // MEM_WB_next = MEM_WB;
         end
+
+        MEM_WB_next[70:69] = MEM_WB_ctrl_next;
+        MEM_WB_next[68:37] = DCACHE_rdata;
+        MEM_WB_next[36:5] = MEM_WB_wData_next;
+        MEM_WB_next[4:0] = EX_MEM_rd;
     end
+
 
     reg CPU_state, CPU_state_next;
 
@@ -340,7 +343,7 @@ module RISCV_Pipeline(clk,
     // module     
     Reg_File RF(.rs1(IF_ID_rs1),
                 .rs2(IF_ID_rs2),
-                .wData(wData),
+                .wData(wDataFin),
                 .rd(MEM_WB_rd),
                 .rData1(rData1),
                 .rData2(rData2),
