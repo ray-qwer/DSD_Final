@@ -149,7 +149,7 @@ module RISCV_Pipeline(clk,
                                     )
                                 ) // second previous is a load
                             ) &&
-                            (ctrlSignal[2]) // now branch
+                            (ctrlSignal[2] || ctrlSignal[0]) // now branch
                             );
 
     assign ALU_IDuse_haz =  (
@@ -159,7 +159,7 @@ module RISCV_Pipeline(clk,
                                 (ID_EX_rd == IF_ID_rs1) ||
                                 (ID_EX_rd == IF_ID_rs2)
                             ) &&
-                            (ctrlSignal[2]) // now branch
+                            (ctrlSignal[2] || ctrlSignal[0]) // now branch
                             );
 
     // assign
