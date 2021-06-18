@@ -2,14 +2,14 @@
 module compress_IF(
     addr,
     addrNext,
-    ins_IF,
     jb,
     clk,
     rst,
     PC,
     ins_icache,
     stall,
-    CPU_stall
+    CPU_stall,
+    ins
 );
 
 // addr: input address, from CPU
@@ -20,7 +20,8 @@ module compress_IF(
 input [31:0] addr,ins_icache;
 input jb,clk,rst,CPU_stall;
 output reg [31:0] addrNext;
-output reg [31:0] ins_IF,PC;
+output reg [31:0] ins;
+output reg [31:2] PC;
 output stall;
 // reg and wire
 // addr_nword: to fetch data from next addr
@@ -28,8 +29,8 @@ output stall;
 // storeIsCompress: data in store is compress instruction
 // compressChecking: check if the command is compress
 reg [1:0] state;
-wire [31:0] addr_nword;
-reg [15:0] store, storeNext,ins_com;
+reg [31:2] addr_nword,addr_nword_Next;
+reg [15:0] store, storeNext;
 wire compressChecking;
 wire storeIsCompress;
 wire [31:0] ins_decom;
@@ -40,62 +41,66 @@ parameter PLUS2 = 2'b01;
 parameter JPLUS = 2'b10;
 
 // assign
-assign addr_nword = {{addr[31:2] + 1'b1},2'b0};
 assign compressChecking = (ins_icache[25:24] != 2'b11); 
 assign storeIsCompress = (store[9:8] != 2'b11);
-assign jCompressChecking = (ins_icache[1:0] != 2'b11);
+assign jCompressChecking = (ins_icache[9:8] != 2'b11);
 // module
-CompressX DC(.ins_cbi(ins_com), .ins_dbi(ins_decom));
+// CompressX DC(.ins_cbi(ins_com), .ins_dbi(ins_decom));
 
 // combinatial isCompress
 always @(*) begin
+    addr_nword_Next = {addr[31:2]};
     case (state)
         IDLE:   begin
-            PC = addr;
+            PC = addr[31:2];
             if (compressChecking) begin
                 storeNext = ins_icache[15:0];
-                ins_com = ins_icache[31:16];
-                ins_IF = ins_decom;
+                ins = {16'b0,ins_icache[31:16]};
+                // ins_IF = ins_decom;
+                addr_nword_Next = {addr[31:2] + 30'd1};
             end
             else begin
                 storeNext = {6'b0,2'b11,8'b0};
-                ins_com = 16'b0;
-                ins_IF = ins_icache;
+                ins = ins_icache;
+                // ins_IF = ins_icache;
             end
         end
         JPLUS:  begin
-            PC = addr;
+            PC = addr[31:2];
             if (jCompressChecking) begin
-                ins_com = ins_icache[15:0];
-                ins_IF = ins_decom;
+                ins = {16'b0,ins_icache[15:0]};
+                // ins_IF = ins_decom;
                 storeNext = {6'b0,2'b11,8'b0};
             end
             else begin
                 // stall and to state PLUS2, which means addr not change, jb = 1'b0
                 storeNext = ins_icache[15:0];
-                ins_com = 16'b0;
-                ins_IF = 32'b0;
+                ins = 32'b0;
+                // ins_IF = 32'b0;
+                addr_nword_Next = {addr[31:2] + 30'd1};
             end
         end
         PLUS2:  begin
             if (storeIsCompress) begin
-                PC = addr;
+                PC = addr[31:2];
                 storeNext = {6'b0,2'b11,8'b0};
-                ins_com = store;
-                ins_IF = ins_decom;
+                ins = {16'b0,store};
+                // ins_IF = ins_decom;
             end 
             else begin
                 PC = addr_nword;
                 storeNext = ins_icache[15:0];
-                ins_com = 16'b0;
-                ins_IF = {store,ins_icache[31:16]};
+                ins = {store,ins_icache[31:16]};
+                // ins_IF = {store,ins_icache[31:16]};
+                if(!jCompressChecking)
+                    addr_nword_Next = {addr_nword[31:2] + 30'd1};
             end
         end
         default: begin
-            PC = addr;
+            PC = addr[31:2];
             storeNext = {6'b0,2'b11,8'b0};
-            ins_com = 16'b0;
-            ins_IF = 32'b0;
+            ins = 32'b0;
+            // ins_IF = 32'b0;
         end
     endcase
 end
@@ -126,12 +131,15 @@ assign stall = ((state == JPLUS) & ~jCompressChecking);
 always @(posedge clk) begin
     if (!rst)begin
         store <= 16'b0;
+        addr_nword <= 30'b0;
     end 
     else if (CPU_stall) begin
         store <= store;
+        addr_nword <= addr_nword;
     end  
     else begin
         store <= storeNext;
+        addr_nword <= addr_nword_Next;
     end
 end
 

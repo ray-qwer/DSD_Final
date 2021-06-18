@@ -1,4 +1,5 @@
 `include "compress_IF.v"
+`include "compress_extention.v"
 module RISCV_Pipeline(clk,
             rst_n,
             //----------I cache interface-------
@@ -122,15 +123,23 @@ module RISCV_Pipeline(clk,
     wire jb_in;
     wire Compstall;
     wire I_stall;
-    wire [31:0] CompAddr;
+    wire [31:2] CompAddr;
     wire [31:0] CompIns;
     wire CPU_stall;
-    assign ICACHE_addr = CompAddr[31:2];
+    assign ICACHE_addr = CompAddr;
     assign jb_in = jb;
     assign I_stall = ICACHE_stall | Compstall;
     assign addr = PC;
     assign CPU_stall = ~((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz));
-
+    reg [31:0] ins, insNext;
+    // compress extention reg and wire
+    wire [31:0] compressExtentionIns;
+    wire [31:0] AddrNext_ICACHE; 
+    wire [31:0] ins_wire;
+    reg [31:0] AddrNext_ICACHE_COM, AddrNext_ICACHE_COM_Next;
+    reg [31:0] PC_ICACHE_COM,PC_ICACHE_COM_Next;
+    assign AddrNext = AddrNext_ICACHE;
+    assign CompIns = (ins[25:24] > 2'b0) ? ins : compressExtentionIns;
     assign load_EXuse_haz = (
                             (ID_EX_ctrl_M[1]) && // previous inst.(load) has MemRead 
                             ~(ID_EX_rd == 5'b0) && 
@@ -239,6 +248,23 @@ module RISCV_Pipeline(clk,
         end
         else jb_next = jb;
     end
+    always@(*) begin
+        if (ctrlSignal[8] || beq || bne) begin
+            insNext = 32'b0;
+            AddrNext_ICACHE_COM_Next = 32'b0;
+            PC_ICACHE_COM_Next = 32'b0;
+        end
+        else if ((~load_EXuse_haz) && (~DCACHE_stall) && (~ICACHE_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz)) begin
+            insNext = ins_wire;
+            AddrNext_ICACHE_COM_Next = AddrNext_ICACHE;
+            PC_ICACHE_COM_Next = PC;
+        end
+        else begin
+            insNext = ins;
+            AddrNext_ICACHE_COM_Next = AddrNext_ICACHE_COM;
+            PC_ICACHE_COM_Next = PC_ICACHE_COM;
+        end
+    end
 
     always @(*) begin
         if ((~load_EXuse_haz) && (~DCACHE_stall) && (~I_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz)) begin
@@ -249,8 +275,8 @@ module RISCV_Pipeline(clk,
         end
 
         if (((~load_EXuse_haz) && (~DCACHE_stall) && (~I_stall) && (~load_IDuse_haz) && (~ALU_IDuse_haz))) begin
-            IF_ID_next[95:64] = AddrNext;
-            IF_ID_next[63:32] = PC;
+            IF_ID_next[95:64] = AddrNext_ICACHE_COM;
+            IF_ID_next[63:32] = PC_ICACHE_COM;
             IF_ID_next[31:0] = CompIns;
             if ((beq || bne || ctrlSignal[8])) begin // branch taken / Jar / Jarl flush
                 IF_ID_next = 97'b0;
@@ -341,6 +367,10 @@ module RISCV_Pipeline(clk,
             ID_EX <= 0;
             EX_MEM <= 0;
             MEM_WB <= 0;
+            jb <= 0;
+            ins <= 32'b0;
+            PC_ICACHE_COM <= 32'b0;
+            AddrNext_ICACHE_COM <= 32'b0;
         end
         else begin
             if (CPU_state) begin
@@ -350,6 +380,10 @@ module RISCV_Pipeline(clk,
                 ID_EX <= ID_EX_next;
                 EX_MEM <= EX_MEM_next;
                 MEM_WB <= MEM_WB_next;
+                jb <= jb_next;
+                ins <= insNext;
+                PC_ICACHE_COM <= PC_ICACHE_COM_Next;
+                AddrNext_ICACHE_COM <= AddrNext_ICACHE_COM_Next;
             end
             else begin
                 PC <= 0;
@@ -358,6 +392,10 @@ module RISCV_Pipeline(clk,
                 ID_EX <= 0;
                 EX_MEM <= 0;
                 MEM_WB <= 0;
+                jb <= 0;
+                ins <= 32'b0;
+                PC_ICACHE_COM <= 32'b0;
+                AddrNext_ICACHE_COM <= 32'b0;
             end
             CPU_state <= CPU_state_next;
         end
@@ -420,15 +458,18 @@ module RISCV_Pipeline(clk,
                     );
     compress_IF comIF(
                         .addr(addr),
-                        .addrNext(AddrNext),
-                        .ins_IF(CompIns),
+                        .addrNext(AddrNext_ICACHE),
                         .jb(jb_in),
                         .clk(clk),
                         .rst(rst_n),
                         .PC(CompAddr),
                         .ins_icache(ICACHE_rdata),
                         .stall(Compstall),
-                        .CPU_stall(CPU_stall)
+                        .CPU_stall(CPU_stall),
+                        .ins(ins_wire)
+    );
+    CompressX CX( .ins_cbi(ins[15:0]),
+                        .ins_dbi(compressExtentionIns)
     );
 
 endmodule
